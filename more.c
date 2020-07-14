@@ -1,12 +1,12 @@
 #define _XOPEN_SOURCE 700
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <fcntl.h>
-#include <unistd.h>
 #include <termios.h>
+#include <unistd.h>
 
 enum {
 	CTRL_B = 0x02,
@@ -20,47 +20,9 @@ enum {
 struct {
 	FILE *tty;
 	struct termios original;
-	enum {
-		FLAG_C = 1 << 0,
-/*
-If a screen is to be written that has no lines in common with the current screen, or more is writing its first screen, more shall not scroll the screen, but instead shall redraw each line of the screen in turn, from the top of the screen to the bottom. In addition, if more is writing its first screen, the screen shall be cleared. This option may be silently ignored on devices with insufficient terminal capabilities.
-*/
-		FLAG_E = 1 << 1,
-/*
-Exit immediately after writing the last line of the last file in the argument list; see the EXTENDED DESCRIPTION section.
-*/
-		FLAG_I = 1 << 2,
-/*
-Perform pattern matching in searches without regard to case; see XBD Regular Expression General Requirements.
-*/
-		FLAG_S = 1 << 3,
-/*
-Behave as if consecutive empty lines were a single empty line.
-*/
-		FLAG_U = 1 << 4,
-/*
-Treat a <backspace> as a printable control character, displayed as an implementation-defined character sequence (see the EXTENDED DESCRIPTION section), suppressing backspacing and the special handling that produces underlined or standout mode text on some terminal types. Also, do not ignore a <carriage-return> at the end of a line.
-*/
-	} flags;
 	int lines;
-/*
-Specify the number of lines per screenful. The number argument is a positive decimal integer. The -n option shall override any values obtained from any other source.
-*/
 	int columns;
 	int ret;
-	char *perfile;
-/*
-Each time a screen from a new file is displayed or redisplayed (including as a result of more commands; for example, :p), execute the more command(s) in the command arguments in the order specified, as if entered by the user after the first screen has been displayed. No intermediate results shall be displayed (that is, if the command is a movement to a screen different from the normal first screen, only the screen resulting from the command shall be displayed.) If any of the commands fail for any reason, an informational message to this effect shall be written, and no further commands specified using the -p option shall be executed for this file.
-*/
-	char *tag;
-/*
-Write the screenful of the file containing the tag named by the tagstring argument. See the ctags utility. The tags feature represented by -t tagstring and the :t command is optional. It shall be provided on any system that also provides a conforming implementation of ctags; otherwise, the use of -t produces undefined results.
-The filename resulting from the -t option shall be logically added as a prefix to the list of command line files, as if specified by the user. If the tag named by the tagstring argument is not found, it shall be an error, and more shall take no further action.
-
-If the tag specifies a line number, the first line of the display shall contain the beginning of that line. If the tag specifies a pattern, the first line of the display shall contain the beginning of the matching text from the first line of the file that contains that pattern. If the line does not exist in the file or matching text is not found, an informational message to this effect shall be displayed, and more shall display the default screen as if -t had not been specified.
-
-If both the -t tagstring and -p command options are given, the -t tagstring shall be processed first; that is, the file and starting line for the display shall be as specified by -t, and then the -p more command shall be executed. If the line (matching text) specified by the -t command does not exist (is not found), no -p more command shall be executed for this file at any time.
-*/
 } global = {0};
 
 struct morefile {
@@ -107,7 +69,9 @@ void refresh(struct morefile *mf)
 	char *line = NULL;
 	size_t n = 0;
 	for (int i = 0; i < global.lines; i++) {
-		getline(&line, &n, mf->f);
+		if (getline(&line, &n, mf->f) == -1) {
+			break;
+		}
 		printf("%s", line);
 	}
 	free(line);
@@ -162,7 +126,7 @@ int more(const char *file)
 	if (strcmp(file, "-")) {
 		mf.f = fopen(file, "r");
 		if (!mf.f) {
-			fprintf(stderr, "Couldn't open %s: %s\n", file, strerror(errno));
+			fprintf(stderr, "more: %s: %s\n", file, strerror(errno));
 			global.ret = 1;
 			return 1;
 		}
@@ -171,10 +135,10 @@ int more(const char *file)
 	if (global.tty == NULL) {
 		/* tty is never opened if stdout is not a tty */
 		int blank = 0;
-		while (getline(&line, &nline, mf.f) > 0) {
-			if (!((global.flags & FLAG_S) && blank)) {
+		while (getline(&line, &nline, mf.f) != -1) {
+			/* if (!((global.flags & FLAG_S) && blank)) { */
 				printf("%s", line);
-			}
+			/* } */
 			blank = !strcmp(line, "\n");
 		}
 		fclose(mf.f);
@@ -352,35 +316,69 @@ int from_env(const char *variable, int def)
 	return n ? n : def;
 }
 
-int main(int argc, char **argv)
+static void adjust_args(int *argc, char ***argv)
+{
+	char *env = getenv("MORE");
+	if (env) {
+		char **newargv = malloc((*argc + 2) * sizeof(*newargv));
+		newargv[0] = *argv[0];
+		
+		/* TODO: account for spaces in env */
+		newargv[1] = env;
+
+		for (int i = 1; i < *argc; i++) {
+			newargv[i + 1] = *argv[i];
+		}
+
+		*argv = newargv;
+		*argc++;
+	}
+	
+	for (int i = 1; i < *argc; i++) {
+		if (!strcmp(**argv, "--")) {
+			return;
+		}
+
+		if (**argv[0] == '+') {
+			**argv[0] = '-';
+		}
+	}
+}
+
+int main(int argc, char *argv[])
 {
 	int c;
 	global.lines = from_env("LINES", 24);
 	global.columns = from_env("COLUMNS", 80);
 
-	/* TODO: process $MORE environment variable */
-	/* effective command line is more $MORE options operands */
+	int clear = 0;
+	int fastexit = 0;
+	int ignorecase = 0;
+	int compressempty = 0;
+	int backspace = 1;
+
+	adjust_args(&argc, &argv);
 
 	while ((c = getopt(argc, argv, "ceisun:p:t:")) != -1) {
 		switch (c) {
 		case 'c':
-			global.flags |= FLAG_C;
+			clear = 1;
 			break;
 
 		case 'e':
-			global.flags |= FLAG_E;
+			fastexit = 1;
 			break;
 
 		case 'i':
-			global.flags |= FLAG_I;
+			ignorecase = 1;
 			break;
 
 		case 's':
-			global.flags |= FLAG_S;
+			compressempty = 1;
 			break;
 
 		case 'u':
-			global.flags |= FLAG_U;
+			backspace = 0;
 			break;
 
 		case 'n':
@@ -388,11 +386,11 @@ int main(int argc, char **argv)
 			break;
 
 		case 'p':
-			global.perfile = optarg;
+			//global.perfile = optarg;
 			break;
 
 		case 't':
-			global.tag = optarg;
+			//global.tag = optarg;
 			break;
 
 		default:
