@@ -1,27 +1,3 @@
-/*
- * UNG's Not GNU
- *
- * Copyright (c) 2011-2020, Jakob Kaivo <jkk@ung.org>
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
-
 #define _XOPEN_SOURCE 700
 #include <ctype.h>
 #include <errno.h>
@@ -29,8 +5,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <termios.h>
 #include <unistd.h>
+
+#include "more.h"
+
+static int retval = 0;
 
 enum {
 	CTRL_B = 0x02,
@@ -39,23 +18,6 @@ enum {
 	CTRL_G = 0x07,
 	CTRL_L = 0x0c,
 	CTRL_U = 0x15,
-};
-
-struct {
-	FILE *tty;
-	struct termios original;
-	int lines;
-	int columns;
-	int ret;
-} global = {0};
-
-struct morefile {
-	FILE *f;
-	FILE *backing;
-	size_t topline;
-	fpos_t *lines;
-	size_t nlines;
-	size_t mark[26];
 };
 
 static ssize_t more_getline(struct morefile *mf, size_t lineno, char **line, size_t *n)
@@ -83,41 +45,11 @@ static ssize_t more_getline(struct morefile *mf, size_t lineno, char **line, siz
 	return getline(line, n, mf->backing);
 }
 
-void resetterm(void)
-{
-	tcsetattr(fileno(global.tty), TCSANOW, &global.original);
-}
-
-void openrawtty(void)
-{
-	struct termios term;
-
-	global.tty = stderr;
-	/* FIXME: only open /dev/tty if stderr is not readable */
-	// if (!(fcntl(fileno(global.tty), F_GETFL) & (O_WRONLY | O_RDWR))) {
-		global.tty = fopen("/dev/tty", "rb+");
-	// }
-	if (global.tty == NULL) {
-		perror("Couldn't open tty for reading");
-		exit(1);
-	}
-
-	setbuf(global.tty, NULL);
-
-	tcgetattr(fileno(global.tty), &global.original);
-	term = global.original;
-	term.c_lflag &= ~(ECHO | ICANON);
-	term.c_cc[VMIN] = 1;
-	term.c_cc[VTIME] = 0;
-	tcsetattr(fileno(global.tty), TCSANOW, &term);
-	atexit(resetterm);
-}
-
-void refresh(struct morefile *mf)
+void refresh(const struct more_tty *mt, struct morefile *mf)
 {
 	char *line = NULL;
 	size_t n = 0;
-	for (size_t i = mf->topline; i < mf->topline + global.lines; i++) {
+	for (size_t i = mf->topline; i < mf->topline + mt->lines; i++) {
 		if (more_getline(mf, i, &line, &n) == -1) {
 			break;
 		}
@@ -126,60 +58,58 @@ void refresh(struct morefile *mf)
 	free(line);
 }
 
-void scroll(struct morefile *mf, int count, int multiple)
+void scroll(const struct more_tty *mt, struct morefile *mf, int count, int multiple)
 {
 	char *line = NULL;
 	size_t n = 0;
 	int by = count ? count * multiple : multiple;
 
 	if (by < 0) {
-		if ((-by) > mf->topline) {
+		if ((size_t)(-by) > mf->topline) {
 			mf->topline = 0;
 		} else {
 			mf->topline += by;
 		}
-		refresh(mf);
+		refresh(mt, mf);
 	} else while (by-- > 0) {
 		mf->topline++;
-		more_getline(mf, mf->topline + global.lines + 1, &line, &n);
+		more_getline(mf, mf->topline + mt->lines + 1, &line, &n);
 		printf("%s", line);
 	}
 
 	free(line);
 }
 
-void mark(struct morefile *mf)
+void mark(const struct more_tty *mt, struct morefile *mf)
 {
-	int c = fgetc(global.tty);
+	int c = fgetc(mt->tty);
 	if (islower(c)) {
 		mf->mark[c - 'a'] = mf->topline;
 	}
 }
 
-void jump(struct morefile *mf)
+void jump(const struct more_tty *mt, struct morefile *mf)
 {
-	int c = fgetc(global.tty);
+	int c = fgetc(mt->tty);
 	if (islower(c)) {
 		mf->topline = mf->mark[c - 'a'];
-		refresh(mf);
+		refresh(mt, mf);
 	}
 }
 
-int more(const char *file)
+int more(const struct more_tty *mt, const char *file)
 {
 	struct morefile mf = {
 		.f = stdin,
 	};
 
 	int count = 0;
-	char *line = NULL;
-	size_t nline = 0;
 
 	if (strcmp(file, "-")) {
 		mf.f = fopen(file, "r");
 		if (!mf.f) {
 			fprintf(stderr, "more: %s: %s\n", file, strerror(errno));
-			global.ret = 1;
+			retval = 1;
 			return 1;
 		}
 	}
@@ -191,9 +121,9 @@ int more(const char *file)
 		mf.backing = mf.f;
 	}
 
-	refresh(&mf);
+	refresh(mt, &mf);
 	while (mf.f) {
-		int c = fgetc(global.tty);
+		int c = fgetc(mt->tty);
 
 		switch (c) {
 			case EOF:
@@ -208,44 +138,44 @@ int more(const char *file)
 			case 'f':
 			case CTRL_F:
 				if (count == 0) {
-					count = global.lines;
+					count = mt->lines;
 				}
-				scroll(&mf, count, 1);
+				scroll(mt, &mf, count, 1);
 				break;
 
 			case 'b':
 			case CTRL_B:
 				if (count == 0) {
-					count = global.lines;
+					count = mt->lines;
 				}
-				scroll(&mf, count, -1);
+				scroll(mt, &mf, count, -1);
 				break;
 
 			case ' ':
-				count = count ? count : global.lines;
+				count = count ? count : mt->lines;
 				/* FALLTHRU */
 			case 'j':
 			case '\n':
-				scroll(&mf, count, 1);
+				scroll(mt, &mf, count, 1);
 				break;
 
 			case 'k':
-				scroll(&mf, count, -1);
+				scroll(mt, &mf, count, -1);
 				break;
 
 			case 'd':
 			case CTRL_D:
-				scroll(&mf, count, global.lines / 2);
+				scroll(mt, &mf, count, mt->lines / 2);
 				break;
 
 			case 's':
 				count = count ? count : 1;
-				scroll(&mf, global.lines + count, 1);
+				scroll(mt, &mf, mt->lines + count, 1);
 				break;
 
 			case 'u':
 			case CTRL_U:
-				scroll(&mf, count, -global.lines / 2);
+				scroll(mt, &mf, count, -mt->lines / 2);
 				break;
 
 			case 'g':
@@ -258,20 +188,20 @@ int more(const char *file)
 
 			case 'r':
 			case CTRL_L:
-				refresh(&mf);
+				refresh(mt, &mf);
 				break;
 
 			case 'R':
 				// discard();
-				refresh(&mf);
+				refresh(mt, &mf);
 				break;
 
 			case 'm':
-				mark(&mf);
+				mark(mt, &mf);
 				break;
 
 			case '\'':
-				jump(&mf);
+				jump(mt, &mf);
 				break;
 
 			case '/':
@@ -291,9 +221,9 @@ int more(const char *file)
 				break;
 
 			case ':': {
-				fputc(c, global.tty);
-				int c2 = fgetc(global.tty);
-				fprintf(global.tty, "\b \b");
+				fputc(c, mt->tty);
+				int c2 = fgetc(mt->tty);
+				fprintf(mt->tty, "\b \b");
 				switch (c2) {
 				case 'e':
 					// examine();
@@ -327,7 +257,7 @@ int more(const char *file)
 				break;
 
 			case 'Z':
-				if (fgetc(global.tty) != 'Z') {
+				if (fgetc(mt->tty) != 'Z') {
 					break;
 				}
 				/* FALLTHRU */
@@ -356,29 +286,6 @@ int more(const char *file)
 	}
 
 	return 0;
-}
-
-static int query_term(const char *cap, const char *variable, int def)
-{
-	int n = 0;
-	char cmd[64];
-	snprintf(cmd, sizeof(cmd), "tput %s", cap);
-	FILE *f = popen(cmd, "r");
-	if (f) {
-		if (fscanf(f, "%d", &n) != 1) {
-			n = 0;
-		}
-		pclose(f);
-		if (n != 0) {
-			return n;
-		}
-	}
-
-	char *value = getenv(variable);
-	if (value) {
-		n = atoi(value);
-	}
-	return n ? n : def;
 }
 
 static void adjust_args(int *argc, char ***argv)
@@ -465,14 +372,13 @@ static int more_cat(const char *path, void (*loop)(FILE *))
 int main(int argc, char *argv[])
 {
 	int c;
-	global.lines = query_term("lines", "LINES", 24);
-	global.columns = query_term("cols", "COLUMNS", 80);
 
 	int clear = 0;
 	int fastexit = 0;
 	int ignorecase = 0;
 	int compressempty = 0;
 	int backspace = 1;
+	int lines = 0;
 
 	adjust_args(&argc, &argv);
 
@@ -499,15 +405,15 @@ int main(int argc, char *argv[])
 			break;
 
 		case 'n':
-			global.lines = atoi(optarg);
+			lines = atoi(optarg);
 			break;
 
 		case 'p':
-			//global.perfile = optarg;
+			//perfile = optarg;
 			break;
 
 		case 't':
-			//global.tag = optarg;
+			//tag = optarg;
 			break;
 
 		default:
@@ -524,18 +430,16 @@ int main(int argc, char *argv[])
 		return ret;
 	}
 
-	openrawtty();
-
-	global.lines--;
+	struct more_tty mt = more_open_tty(lines);
 
 	if (optind >= argc) {
-		more("-");
+		more(&mt, "-");
 	}
 
 	int min = optind;
 	int max = argc - 1;
 	while (optind < argc) {
-		int next = more(argv[optind]);
+		int next = more(&mt, argv[optind]);
 		optind += next;
 		if (optind < min) {
 			optind = min;
@@ -545,5 +449,10 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	return global.ret;
+	(void)clear;
+	(void)fastexit;
+	(void)ignorecase;
+	(void)backspace;
+
+	return retval;
 }
