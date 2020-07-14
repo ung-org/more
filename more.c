@@ -338,17 +338,19 @@ static void adjust_args(int *argc, char ***argv)
 	char *env = getenv("MORE");
 	if (env) {
 		char **newargv = malloc((*argc + 2) * sizeof(*newargv));
-		newargv[0] = *argv[0];
+		newargv[0] = (*argv)[0];
 		
 		/* TODO: account for spaces in env */
 		newargv[1] = env;
 
 		for (int i = 1; i < *argc; i++) {
-			newargv[i + 1] = *argv[i];
+			newargv[i + 1] = (*argv)[i];
 		}
 
+		newargv[*argc + 1] = NULL;
+
 		*argv = newargv;
-		*argc++;
+		(*argc)++;
 	}
 	
 	for (int i = 1; i < *argc; i++) {
