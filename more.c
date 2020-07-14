@@ -1,7 +1,6 @@
 #define _XOPEN_SOURCE 700
 #include <ctype.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -50,9 +49,12 @@ void refresh(const struct more_tty *mt, struct morefile *mf)
 	char *line = NULL;
 	size_t n = 0;
 	for (size_t i = mf->topline; i < mf->topline + mt->lines; i++) {
+		/* FIXME: account for long lines */
+
 		if (more_getline(mf, i, &line, &n) == -1) {
 			break;
 		}
+
 		printf("%s", line);
 	}
 	free(line);
@@ -72,6 +74,8 @@ void scroll(const struct more_tty *mt, struct morefile *mf, int count, int multi
 		}
 		refresh(mt, mf);
 	} else while (by-- > 0) {
+		/* FIXME: account for long lines here, too */
+
 		mf->topline++;
 		more_getline(mf, mf->topline + mt->lines + 1, &line, &n);
 		printf("%s", line);
