@@ -375,14 +375,18 @@ static void cat_loop(FILE *f)
 
 static void compress_loop(FILE *f)
 {
+	static int nl = 0;
 	int c = 0;
-	int nl = 0;
+
 	while ((c = fgetc(f)) != EOF) {
 		if (c == '\n') {
-			if (nl) {
+			if (nl == 2) {
 				continue;
+			} else if (nl == 1) {
+				nl = 2;
+			} else {
+				nl = 1;
 			}
-			nl = 1;
 		} else {
 			nl = 0;
 		}
