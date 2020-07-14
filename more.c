@@ -381,7 +381,7 @@ static void compress_loop(FILE *f)
 	}
 }
 
-static int more_cat(const char *path, int compressempty)
+static int more_cat(const char *path, void (*loop)(FILE *))
 {
 	FILE *f = stdin;
 	if (path != NULL && strcmp(path, "-") != 0) {
@@ -392,11 +392,7 @@ static int more_cat(const char *path, int compressempty)
 		}
 	}
 
-	if (compressempty) {
-		compress_loop(f);
-	} else {
-		cat_loop(f);
-	}
+	loop(f);
 
 	if (f != stdin) {
 		fclose(f);
@@ -460,13 +456,15 @@ int main(int argc, char *argv[])
 
 	if (!isatty(STDOUT_FILENO)) {
 		int ret = 0;
+		void (*loop)(FILE*) = compressempty ? compress_loop : cat_loop;
 		do {
-			ret |= more_cat(argv[optind++], compressempty);
+			ret |= more_cat(argv[optind++], loop);
 		} while (optind < argc);
 		return ret;
 	}
 
 	openrawtty();
+
 	global.lines--;
 
 	if (optind >= argc) {
