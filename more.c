@@ -132,19 +132,6 @@ int more(const char *file)
 		}
 	}
 
-	if (global.tty == NULL) {
-		/* tty is never opened if stdout is not a tty */
-		int blank = 0;
-		while (getline(&line, &nline, mf.f) != -1) {
-			/* if (!((global.flags & FLAG_S) && blank)) { */
-				printf("%s", line);
-			/* } */
-			blank = !strcmp(line, "\n");
-		}
-		fclose(mf.f);
-		return 1;
-	}
-
 	refresh(&mf);
 	while (mf.f) {
 		int c = fgetc(global.tty);
