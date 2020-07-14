@@ -306,9 +306,20 @@ int more(const char *file)
 	return 0;
 }
 
-int from_env(const char *variable, int def)
+static int query_term(const char *cap, const char *variable, int def)
 {
 	int n = 0;
+	char cmd[64];
+	snprintf(cmd, sizeof(cmd), "tput %s", cap);
+	FILE *f = popen(cmd, "r");
+	if (f) {
+		fscanf(f, "%d", &n);
+		pclose(f);
+		if (n != 0) {
+			return n;
+		}
+	}
+
 	char *value = getenv(variable);
 	if (value) {
 		n = atoi(value);
@@ -348,8 +359,8 @@ static void adjust_args(int *argc, char ***argv)
 int main(int argc, char *argv[])
 {
 	int c;
-	global.lines = from_env("LINES", 24);
-	global.columns = from_env("COLUMNS", 80);
+	global.lines = query_term("lines", "LINES", 24);
+	global.columns = query_term("cols", "COLUMNS", 80);
 
 	int clear = 0;
 	int fastexit = 0;
