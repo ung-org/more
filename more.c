@@ -352,12 +352,13 @@ static void adjust_args(int *argc, char ***argv)
 	}
 	
 	for (int i = 1; i < *argc; i++) {
-		if (!strcmp(**argv, "--")) {
+		if (!strcmp((*argv)[i], "--")) {
 			return;
 		}
 
-		if (**argv[0] == '+') {
-			**argv[0] = '-';
+		if ((*argv)[i][0] == '+') {
+			fprintf(stderr, "more: adjusting command line option +%s to -%s\n", (*argv)[i] + 1, (*argv)[i] + 1);
+			(*argv)[i][0] = '-';
 		}
 	}
 }
