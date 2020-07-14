@@ -19,51 +19,21 @@ enum {
 	CTRL_U = 0x15,
 };
 
-static ssize_t more_getline(struct morefile *mf, size_t lineno, char **line, size_t *n)
+void refresh(const struct more_tty *mt, struct more_file *mf)
 {
-	if (mf->nlines <= lineno && mf->nlines != 0) {
-		fsetpos(mf->f, &(mf->lines[mf->nlines - 1]));
-		getline(line, n, mf->f);
-	}
-
-	while (mf->nlines <= lineno) {
-		mf->nlines++;
-		mf->lines = realloc(mf->lines, mf->nlines * sizeof(*mf->lines));
-
-		fgetpos(mf->f, &(mf->lines[mf->nlines - 1]));
-
-		getline(line, n, mf->f);
-
-		if (mf->backing != mf->f) {
-			fgetpos(mf->backing, &(mf->lines[mf->nlines - 1]));
-			fputs(*line, mf->backing);
-		}
-	}
-
-	fsetpos(mf->backing, &(mf->lines[lineno]));
-	return getline(line, n, mf->backing);
-}
-
-void refresh(const struct more_tty *mt, struct morefile *mf)
-{
-	char *line = NULL;
-	size_t n = 0;
 	for (size_t i = mf->topline; i < mf->topline + mt->lines; i++) {
 		/* FIXME: account for long lines */
 
-		if (more_getline(mf, i, &line, &n) == -1) {
+		if (more_getline(mf, i) == -1) {
 			break;
 		}
 
-		printf("%s", line);
+		printf("%s", mf->buf);
 	}
-	free(line);
 }
 
-void scroll(const struct more_tty *mt, struct morefile *mf, int count, int multiple)
+void scroll(const struct more_tty *mt, struct more_file *mf, int count, int multiple)
 {
-	char *line = NULL;
-	size_t n = 0;
 	int by = count ? count * multiple : multiple;
 
 	if (by < 0) {
@@ -77,14 +47,12 @@ void scroll(const struct more_tty *mt, struct morefile *mf, int count, int multi
 		/* FIXME: account for long lines here, too */
 
 		mf->topline++;
-		more_getline(mf, mf->topline + mt->lines + 1, &line, &n);
-		printf("%s", line);
+		more_getline(mf, mf->topline + mt->lines + 1);
+		printf("%s", mf->buf);
 	}
-
-	free(line);
 }
 
-void mark(const struct more_tty *mt, struct morefile *mf)
+void mark(const struct more_tty *mt, struct more_file *mf)
 {
 	int c = fgetc(mt->tty);
 	if (islower(c)) {
@@ -92,7 +60,7 @@ void mark(const struct more_tty *mt, struct morefile *mf)
 	}
 }
 
-void jump(const struct more_tty *mt, struct morefile *mf)
+void jump(const struct more_tty *mt, struct more_file *mf)
 {
 	int c = fgetc(mt->tty);
 	if (islower(c)) {
@@ -103,29 +71,16 @@ void jump(const struct more_tty *mt, struct morefile *mf)
 
 int more(const struct more_tty *mt, const char *file)
 {
-	struct morefile mf = {
-		.f = stdin,
-	};
+	struct more_file mf = more_open(file);
 
-	int count = 0;
-
-	if (strcmp(file, "-")) {
-		mf.f = fopen(file, "r");
-		if (!mf.f) {
-			fprintf(stderr, "more: %s: %s\n", file, strerror(errno));
-			retval = 1;
-			return 1;
-		}
-	}
-
-	fpos_t pos;
-	if (fgetpos(mf.f, &pos) != 0) {
-		mf.backing = tmpfile();
-	} else {
-		mf.backing = mf.f;
+	if (mf.f == NULL) {
+		retval = 1;
+		return 1;
 	}
 
 	refresh(mt, &mf);
+
+	int count = 0;
 	while (mf.f) {
 		int c = fgetc(mt->tty);
 
@@ -234,9 +189,11 @@ int more(const struct more_tty *mt, const char *file)
 					break;
 
 				case 'n':
+					more_close(&mf);
 					return count ? count : 1;
 
 				case 'p':
+					more_close(&mf);
 					return count ? -count : -1;
 
 				case 't':
@@ -289,6 +246,7 @@ int more(const struct more_tty *mt, const char *file)
 		}
 	}
 
+	more_close(&mf);
 	return 0;
 }
 

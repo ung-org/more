@@ -18,7 +18,13 @@ all: $(BINDIR)/more
 clean:
 	rm -f $(BINDIR)/more $(OBJDIR)/*.o
 
+$(BINDIR)/more: $(OBJDIR)/io.o
+$(OBJDIR)/io.o: $(SRCDIR)/more.h
+$(OBJDIR)/io.o: $(SRCDIR)/io.c
+	$(CC) $(CFLAGS) -o $@ -c $(SRCDIR)/io.c
+
 $(BINDIR)/more: $(OBJDIR)/more.o
+$(OBJDIR)/more.o: $(SRCDIR)/more.h
 $(OBJDIR)/more.o: $(SRCDIR)/more.c
 	$(CC) $(CFLAGS) -o $@ -c $(SRCDIR)/more.c
 
