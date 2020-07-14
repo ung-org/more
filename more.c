@@ -161,12 +161,12 @@ int more(const char *file)
 
 			case 'f':
 			case CTRL_F:
-				scroll(&mf, count, global.lines);
+				scroll(&mf, count, 1);
 				break;
 
 			case 'b':
 			case CTRL_B:
-				scroll(&mf, count, -global.lines);
+				scroll(&mf, count, -1);
 				break;
 
 			case ' ':
