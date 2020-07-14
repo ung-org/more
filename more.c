@@ -132,8 +132,12 @@ void scroll(struct morefile *mf, int count, int multiple)
 	size_t n = 0;
 	int by = count ? count * multiple : multiple;
 
-	if ((by < 0) && ((-by) > mf->topline)) {
-		mf->topline = 0;
+	if (by < 0) {
+		if ((-by) > mf->topline) {
+			mf->topline = 0;
+		} else {
+			mf->topline += by;
+		}
 		refresh(mf);
 	} else while (by-- > 0) {
 		mf->topline++;
@@ -522,7 +526,7 @@ int main(int argc, char *argv[])
 
 	openrawtty();
 
-	global.lines -= 2;
+	global.lines--;
 
 	if (optind >= argc) {
 		more("-");
