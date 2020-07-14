@@ -365,6 +365,55 @@ static void adjust_args(int *argc, char ***argv)
 	}
 }
 
+static void cat_loop(FILE *f)
+{
+	int c = 0;
+	while ((c = fgetc(f)) != EOF) {
+		putchar(c);
+	}
+}
+
+static void compress_loop(FILE *f)
+{
+	int c = 0;
+	int nl = 0;
+	while ((c = fgetc(f)) != EOF) {
+		if (c == '\n') {
+			if (nl) {
+				continue;
+			}
+			nl = 1;
+		} else {
+			nl = 0;
+		}
+		putchar(c);
+	}
+}
+
+static int more_cat(const char *path, int compressempty)
+{
+	FILE *f = stdin;
+	if (path != NULL && strcmp(path, "-") != 0) {
+		f = fopen(path, "r");
+		if (!f) {
+			fprintf(stderr, "more: %s: %s\n", path, strerror(errno));
+			return 1;
+		}
+	}
+
+	if (compressempty) {
+		compress_loop(f);
+	} else {
+		cat_loop(f);
+	}
+
+	if (f != stdin) {
+		fclose(f);
+	}
+
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	int c;
@@ -418,10 +467,15 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if (isatty(STDOUT_FILENO)) {
-		openrawtty();
+	if (!isatty(STDOUT_FILENO)) {
+		int ret = 0;
+		do {
+			ret |= more_cat(argv[optind++], compressempty);
+		} while (optind < argc);
+		return ret;
 	}
 
+	openrawtty();
 	global.lines--;
 
 	if (optind >= argc) {
