@@ -51,12 +51,37 @@ struct {
 
 struct morefile {
 	FILE *f;
-	int topline;
-	char **lines;
+	FILE *backing;
+	size_t topline;
+	fpos_t *lines;
 	size_t nlines;
-	char *pattern;
-	int mark[26];
+	size_t mark[26];
 };
+
+static ssize_t more_getline(struct morefile *mf, size_t lineno, char **line, size_t *n)
+{
+	if (mf->nlines <= lineno && mf->nlines != 0) {
+		fsetpos(mf->f, &(mf->lines[mf->nlines - 1]));
+		getline(line, n, mf->f);
+	}
+
+	while (mf->nlines <= lineno) {
+		mf->nlines++;
+		mf->lines = realloc(mf->lines, mf->nlines * sizeof(*mf->lines));
+
+		fgetpos(mf->f, &(mf->lines[mf->nlines - 1]));
+
+		getline(line, n, mf->f);
+
+		if (mf->backing != mf->f) {
+			fgetpos(mf->backing, &(mf->lines[mf->nlines - 1]));
+			fputs(*line, mf->backing);
+		}
+	}
+
+	fsetpos(mf->backing, &(mf->lines[lineno]));
+	return getline(line, n, mf->backing);
+}
 
 void resetterm(void)
 {
@@ -68,10 +93,10 @@ void openrawtty(void)
 	struct termios term;
 
 	global.tty = stderr;
-	/* FIXME */
-	/* if (!(fcntl(fileno(global.tty), F_GETFL) & (O_WRONLY | O_RDWR))) { */
+	/* FIXME: only open /dev/tty if stderr is not readable */
+	// if (!(fcntl(fileno(global.tty), F_GETFL) & (O_WRONLY | O_RDWR))) {
 		global.tty = fopen("/dev/tty", "rb+");
-	/* } */
+	// }
 	if (global.tty == NULL) {
 		perror("Couldn't open tty for reading");
 		exit(1);
@@ -92,8 +117,8 @@ void refresh(struct morefile *mf)
 {
 	char *line = NULL;
 	size_t n = 0;
-	for (int i = 0; i < global.lines; i++) {
-		if (getline(&line, &n, mf->f) == -1) {
+	for (size_t i = mf->topline; i < mf->topline + global.lines; i++) {
+		if (more_getline(mf, i, &line, &n) == -1) {
 			break;
 		}
 		printf("%s", line);
@@ -105,21 +130,17 @@ void scroll(struct morefile *mf, int count, int multiple)
 {
 	char *line = NULL;
 	size_t n = 0;
-	int total = count ? count * multiple : multiple;
-	for (int i = 0; i < total; i++) {
-		ssize_t nread = getline(&line, &n, mf->f);
-		if (nread <= 0) {
-			break;
-		}
-		printf("%s", line);
-		mf->topline++;
+	int by = count ? count * multiple : multiple;
 
-		/* FIXME: doesn't account for tabs */
-		while (nread > global.columns) {
-			i++;
-			nread -= global.columns;
-		}
+	if ((by < 0) && ((-by) > mf->topline)) {
+		mf->topline = 0;
+		refresh(mf);
+	} else while (by-- > 0) {
+		mf->topline++;
+		more_getline(mf, mf->topline + global.lines + 1, &line, &n);
+		printf("%s", line);
 	}
+
 	free(line);
 }
 
@@ -142,7 +163,10 @@ void jump(struct morefile *mf)
 
 int more(const char *file)
 {
-	struct morefile mf = { stdin, 0 };
+	struct morefile mf = {
+		.f = stdin,
+	};
+
 	int count = 0;
 	char *line = NULL;
 	size_t nline = 0;
@@ -154,6 +178,13 @@ int more(const char *file)
 			global.ret = 1;
 			return 1;
 		}
+	}
+
+	fpos_t pos;
+	if (fgetpos(mf.f, &pos) != 0) {
+		mf.backing = tmpfile();
+	} else {
+		mf.backing = mf.f;
 	}
 
 	refresh(&mf);
@@ -491,7 +522,7 @@ int main(int argc, char *argv[])
 
 	openrawtty();
 
-	global.lines--;
+	global.lines -= 2;
 
 	if (optind >= argc) {
 		more("-");
