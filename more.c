@@ -47,7 +47,9 @@ void scroll(const struct more_tty *mt, struct more_file *mf, int count, int mult
 		/* FIXME: account for long lines here, too */
 
 		mf->topline++;
-		more_getline(mf, mf->topline + mt->lines + 1);
+		if (more_getline(mf, mf->topline + mt->lines + 1) < 0) {
+			break;
+		}
 		printf("%s", mf->buf);
 	}
 }
