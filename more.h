@@ -14,6 +14,8 @@ struct more_file {
 	fpos_t *lines;
 	size_t nlines;
 	size_t mark[26];
+	size_t nbytes;
+	size_t *bytepos;
 	char *buf;
 	size_t nbuf;
 };

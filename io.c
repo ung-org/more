@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "more.h"
 
@@ -16,10 +18,16 @@ ssize_t more_getline(struct more_file *mf, size_t lineno)
 	while (mf->nlines <= lineno) {
 		mf->nlines++;
 		mf->lines = realloc(mf->lines, mf->nlines * sizeof(*mf->lines));
+		mf->bytepos = realloc(mf->bytepos, mf->nlines * sizeof(*mf->bytepos));
 
 		fgetpos(mf->f, &(mf->lines[mf->nlines - 1]));
 
 		getline(&(mf->buf), &(mf->nbuf), mf->f);
+		if (mf->nlines > 1) {
+			mf->bytepos[mf->nlines - 1] = mf->bytepos[mf->nlines - 2] + strlen(mf->buf);
+		} else {
+			mf->bytepos[0] = 0;
+		}
 
 		if (mf->backing != mf->f) {
 			fgetpos(mf->backing, &(mf->lines[mf->nlines - 1]));
@@ -50,6 +58,9 @@ struct more_file more_open(const char *path)
 		mf.backing = tmpfile();
 	} else {
 		mf.backing = mf.f;
+		struct stat st;
+		fstat(fileno(mf.f), &st);
+		mf.nbytes = st.st_size;
 	}
 
 	return mf;
