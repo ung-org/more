@@ -1,7 +1,6 @@
 #define _XOPEN_SOURCE 700
 #include <ctype.h>
 #include <errno.h>
-#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -72,9 +71,9 @@ void jump(const struct more_tty *mt, struct more_file *mf)
 	}
 }
 
-int more(const struct more_tty *mt, const char *file)
+int more(const struct more_tty *mt, const char *path)
 {
-	struct more_file mf = more_open(file);
+	struct more_file mf = more_open(path);
 
 	if (mf.f == NULL) {
 		retval = 1;
@@ -142,7 +141,7 @@ int more(const struct more_tty *mt, const char *file)
 
 			case 'G':
 				if (count == 0) {
-					count = INT_MAX;
+					count = mf.nbytes;
 				}
 				/* FALLTHRU */
 			case 'g':
@@ -216,7 +215,7 @@ int more(const struct more_tty *mt, const char *file)
 
 			case '=':
 			case CTRL_G:
-				// display_position();
+				printf("%s; File %d/%d; Line %zd; Byte %zd/%zd; %zd%%", path, 0, 0, mf.topline, mf.bytepos[mf.topline], mf.nbytes, 100 * mf.bytepos[mf.topline] / mf.nbytes);
 				break;
 
 			case 'Z':
