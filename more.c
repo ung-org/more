@@ -1,6 +1,7 @@
 #define _XOPEN_SOURCE 700
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -139,21 +140,20 @@ int more(const struct more_tty *mt, const char *file)
 				scroll(mt, &mf, count, -mt->lines / 2);
 				break;
 
-			case 'g':
-				//scroll_beginning(count);
-				break;
-
 			case 'G':
-				//scroll_end(count);
-				break;
-
-			case 'r':
-			case CTRL_L:
-				refresh(mt, &mf);
+				if (count == 0) {
+					count = INT_MAX;
+				}
+				/* FALLTHRU */
+			case 'g':
+				scroll(mt, &mf, count - mf.topline, 1);
 				break;
 
 			case 'R':
 				// discard();
+				/* FALLTHRU */
+			case 'r':
+			case CTRL_L:
 				refresh(mt, &mf);
 				break;
 
